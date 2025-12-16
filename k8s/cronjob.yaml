@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: entra-sync
+spec:
+  schedule: "0 * * * *" # every hour
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: entra-sync-sa # bind to workload identity if using Secret Manager CSI
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: "gcr.io/your-project/entra-to-isv:latest"
+              imagePullPolicy: IfNotPresent
+              command: ["entra-sync", "sync", "--config", "/app/config/mapping.yaml", "--env-file", "/var/secrets/.env"]
+              env:
+                - name: TZ
+                  value: "UTC"
+              volumeMounts:
+                - name: mapping
+                  mountPath: /app/config
+                  readOnly: true
+                - name: secret-env
+                  mountPath: /var/secrets
+                  readOnly: true
+          volumes:
+            - name: mapping
+              configMap:
+                name: entra-sync-mapping
+                items:
+                  - key: mapping.yaml
+                    path: mapping.yaml
+            - name: secret-env
+              secret:
+                secretName: entra-sync-env
+                items:
+                  - key: .env
+                    path: .env

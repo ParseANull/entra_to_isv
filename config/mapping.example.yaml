@@ -1,0 +1,148 @@
+# Sample mapping and sync options for Azure AD -> IBM Security Verify
+
+# ============================================================================
+# EXAMPLE TRANSFORMATIONS
+# ============================================================================
+# 
+# Example 1: Basic user mapping
+# Azure AD Source (Graph API):
+#   {
+#     "userPrincipalName": "alice.anderson@contoso.com",
+#     "givenName": "Alice",
+#     "surname": "Anderson",
+#     "displayName": "Alice Anderson",
+#     "mail": "alice.anderson@contoso.com",
+#     "accountEnabled": true
+#   }
+# 
+# IBM Security Verify Destination (SCIM):
+#   {
+#     "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+#     "userName": "alice.anderson@contoso.com",
+#     "name": {
+#       "givenName": "Alice",
+#       "familyName": "Anderson"
+#     },
+#     "displayName": "Alice Anderson",
+#     "emails": [
+#       {
+#         "value": "alice.anderson@contoso.com",
+#         "type": "work",
+#         "primary": true
+#       }
+#     ],
+#     "active": true
+#   }
+# 
+# Example 2: Disabled user (accountEnabled = false)
+# Azure AD Source:
+#   {
+#     "userPrincipalName": "bob.baker@contoso.com",
+#     "givenName": "Bob",
+#     "surname": "Baker",
+#     "displayName": "Bob Baker (Disabled)",
+#     "accountEnabled": false
+#   }
+# 
+# IBM Security Verify Destination:
+#   {
+#     "userName": "bob.baker@contoso.com",
+#     "name": {
+#       "givenName": "Bob",
+#       "familyName": "Baker"
+#     },
+#     "displayName": "Bob Baker (Disabled)",
+#     "active": false
+#   }
+#   Note: Missing 'mail' field results in no 'emails' array in destination
+# 
+# Example 3: User with mobile phone (when include_mobile_phone: true)
+# Azure AD Source:
+#   {
+#     "userPrincipalName": "carol.clark@contoso.com",
+#     "givenName": "Carol",
+#     "surname": "Clark",
+#     "displayName": "Carol Clark",
+#     "mail": "carol.clark@contoso.com",
+#     "mobilePhone": "+1-555-0123",
+#     "accountEnabled": true
+#   }
+# 
+# IBM Security Verify Destination:
+#   {
+#     "userName": "carol.clark@contoso.com",
+#     "name": {
+#       "givenName": "Carol",
+#       "familyName": "Clark"
+#     },
+#     "displayName": "Carol Clark",
+#     "emails": [
+#       {
+#         "value": "carol.clark@contoso.com",
+#         "type": "work",
+#         "primary": true
+#       }
+#     ],
+#     "phoneNumbers": [
+#       {
+#         "value": "+1-555-0123",
+#         "type": "mobile",
+#         "primary": true
+#       }
+#     ],
+#     "active": true
+#   }
+# ============================================================================
+
+# Optional: set explicit IDs here or rely on env vars (recommended)
+# graph:
+#   tenant_id: "${GRAPH_TENANT_ID}"
+#   client_id: "${GRAPH_CLIENT_ID}"
+#   client_secret: "${GRAPH_CLIENT_SECRET}"
+#   scope: "https://graph.microsoft.com/.default"
+
+# verify:
+#   base_url: "${VERIFY_BASE_URL}"
+#   api_token: "${VERIFY_API_TOKEN}"
+
+# Sync behavior options
+sync:
+  # When true, users with accountEnabled=false in Azure AD are marked as active=false in Verify
+  # When false, disabled users are synced as-is without forced deactivation
+  # Recommended: true (keeps account status in sync between systems)
+  deactivate_disabled: true
+  
+  # When true, copies the mobilePhone field from Azure AD to phoneNumbers array in Verify
+  # When false, mobile phone numbers are not synced
+  # Recommended: false unless your organization needs mobile numbers in Verify
+  include_mobile_phone: false
+  
+  # When true, users that exist in Verify but not in Azure AD are marked inactive
+  # When false, only users found in Azure AD are processed
+  # Currently unused - reserved for future enhancement
+  treat_missing_as_inactive: false
+
+# Attribute Mapping: destination (SCIM field in Verify) <- source (Graph API field in Azure AD)
+# Format: "destination.path: sourceField" maps Azure AD field to SCIM structure
+attribute_mapping:
+  # SCIM userName (required) <- Azure AD userPrincipalName
+  userName: userPrincipalName
+  
+  # SCIM name.givenName <- Azure AD givenName (first name)
+  name.givenName: givenName
+  
+  # SCIM name.familyName <- Azure AD surname (last name)
+  name.familyName: surname
+  
+  # SCIM displayName <- Azure AD displayName (full display name)
+  displayName: displayName
+  
+  # SCIM emails array <- Azure AD mail field
+  # Each entry specifies source field, email type, and whether it's primary
+  emails:
+    - source: mail          # Azure AD field: mail (primary email address)
+      type: work            # SCIM email type in Verify
+      primary: true         # Mark as primary email in Verify
+  
+  # SCIM active (boolean) <- Azure AD accountEnabled (account status)
+  active: accountEnabled

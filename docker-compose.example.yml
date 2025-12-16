@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  entra-sync:
+    build: .
+    image: entra-to-isv:local
+    command: ["sync", "--config", "/config/mapping.example.yaml"]
+    env_file:
+      - .env
+    volumes:
+      - ./config:/config:ro
