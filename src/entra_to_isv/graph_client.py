@@ -137,3 +137,26 @@ class GraphClient:
 
         # users: complete list of all users from all pages, ready to return.
         return users
+
+    def get_user_by_upn(self, user_principal_name: str) -> Optional[Dict]:
+        """Fetch a single user by `userPrincipalName` (UPN).
+
+        We use the Graph shortcut that allows addressing a user by UPN directly
+        in the path segment. Handy for compare operations in the REPL.
+
+        Args:
+            user_principal_name: The Azure AD UPN (usually email-like identifier).
+
+        Returns:
+            The user dict if found, otherwise None.
+        """
+        url = f"https://graph.microsoft.com/v1.0/users/{user_principal_name}"
+        params = {
+            "$select": "id,userPrincipalName,givenName,surname,displayName,mail,mobilePhone,accountEnabled",
+        }
+        resp = self._http.get(url, headers=self._headers(), params=params)
+        if resp.status_code == 404:
+            return None
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Graph request failed: {resp.status_code} {resp.text}")
+        return resp.json()

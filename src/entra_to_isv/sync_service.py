@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Dict, Iterable, List, Tuple
 
-from .config import AppConfig
+from .config import AppConfig, get_attribute_mapping
 from .graph_client import GraphClient
-from .mapper import get_attribute_mapping, map_user
+from .mapper import map_user
 from .verify_client import VerifyClient
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,41 @@ def _needs_update(mapped: Dict, existing: Dict) -> bool:
 
     # All checks passed - no meaningful differences detected.
     return False
+
+
+def _compute_diffs(mapped: Dict, existing: Dict) -> Dict[str, Dict[str, object]]:
+    """Compute a diff between two SCIM user dicts focused on mapped fields.
+
+    Returns a dict keyed by field path with {"current": X, "new": Y} entries
+    for any field that would change if we updated the user.
+    """
+    diffs: Dict[str, Dict[str, object]] = {}
+
+    def set_diff(key: str, a, b):
+        if a != b:
+            diffs[key] = {"current": a, "new": b}
+
+    set_diff("userName", existing.get("userName"), mapped.get("userName"))
+    set_diff("displayName", existing.get("displayName"), mapped.get("displayName"))
+    set_diff("active", existing.get("active"), mapped.get("active"))
+
+    ex_name = existing.get("name", {})
+    mp_name = mapped.get("name", {})
+    set_diff("name.givenName", ex_name.get("givenName"), mp_name.get("givenName"))
+    set_diff("name.familyName", ex_name.get("familyName"), mp_name.get("familyName"))
+
+    if "emails" in mapped:
+        if not _emails_equal(mapped.get("emails", []), existing.get("emails", [])):
+            diffs["emails"] = {"current": existing.get("emails", []), "new": mapped.get("emails", [])}
+
+    if "phoneNumbers" in mapped:
+        if mapped.get("phoneNumbers", []) != existing.get("phoneNumbers", []):
+            diffs["phoneNumbers"] = {
+                "current": existing.get("phoneNumbers", []),
+                "new": mapped.get("phoneNumbers", []),
+            }
+
+    return diffs
 
 
 def _partition_changes(
@@ -239,3 +274,79 @@ def sync_users(config: AppConfig, dry_run: bool = False) -> None:
     
     # All creates and updates complete. mapped_users, to_create, to_update disposed.
     # Function exits, sync cycle complete.
+
+
+def plan_sync(config: AppConfig) -> Tuple[List[Tuple[Dict, Dict]], List[Tuple[Dict, Dict]], int]:
+    """Plan the synchronization without applying changes.
+
+    Returns lists of users to create and to update, plus total source user count.
+    """
+    graph = GraphClient(
+        tenant_id=config.graph.tenant_id,
+        client_id=config.graph.client_id,
+        client_secret=config.graph.client_secret,
+        scope=config.graph.scope,
+    )
+    verify = VerifyClient(
+        base_url=config.verify.base_url,
+        api_token=config.verify.api_token,
+    )
+
+    mapping = get_attribute_mapping(config)
+    source_users = graph.list_users()
+
+    mapped_users: List[Tuple[Dict, Dict]] = []
+    for user in source_users:
+        mapped = map_user(user, mapping, include_mobile=config.sync.include_mobile_phone)
+        if not user.get("accountEnabled") and config.sync.deactivate_disabled:
+            mapped["active"] = False
+        mapped_users.append((user, mapped))
+
+    to_create, to_update = _partition_changes(mapped_users, verify)
+    return to_create, to_update, len(source_users)
+
+
+def compare_account(config: AppConfig, username: str) -> Dict[str, object]:
+    """Compare a single account between Azure AD and Verify.
+
+    Looks up the Azure AD user by UPN, maps to SCIM, looks up Verify user by
+    userName, and returns a structured comparison with diffs.
+    """
+    graph = GraphClient(
+        tenant_id=config.graph.tenant_id,
+        client_id=config.graph.client_id,
+        client_secret=config.graph.client_secret,
+        scope=config.graph.scope,
+    )
+    verify = VerifyClient(
+        base_url=config.verify.base_url,
+        api_token=config.verify.api_token,
+    )
+
+    source = graph.get_user_by_upn(username)
+    if not source:
+        return {"status": "not_found_in_azure", "username": username}
+
+    mapping = get_attribute_mapping(config)
+    mapped = map_user(source, mapping, include_mobile=config.sync.include_mobile_phone)
+    if not source.get("accountEnabled") and config.sync.deactivate_disabled:
+        mapped["active"] = False
+
+    existing = verify.find_user_by_username(mapped["userName"])
+    if not existing:
+        return {
+            "status": "not_found_in_verify",
+            "username": mapped["userName"],
+            "azure_source": source,
+            "scim_mapped": mapped,
+        }
+
+    diffs = _compute_diffs(mapped, existing)
+    return {
+        "status": "found_both",
+        "username": mapped["userName"],
+        "diffs": diffs,
+        "azure_source": source,
+        "scim_mapped": mapped,
+        "verify_current": existing,
+    }

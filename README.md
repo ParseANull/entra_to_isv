@@ -20,6 +20,10 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\Activate.ps1
 pip install .
 entra-sync sync --config config/mapping.example.yaml --env-file .env
+entra-sync repl --config config/mapping.example.yaml --env-file .env
+# Non-interactive
+entra-sync whatif --config config/mapping.example.yaml --env-file .env --output plan.json --format json
+entra-sync compare user@contoso.com --config config/mapping.example.yaml --env-file .env --output compare.csv --format csv
 ```
 Use `--dry-run` to preview without making changes, and `-v` for debug logs.
 
@@ -41,6 +45,15 @@ docker run --rm --env-file .env -v $(pwd)/config:/app/config:ro entra-to-isv:loc
 - Maps attributes per YAML; defaults cover `userName`, names, `displayName`, `mail` → emails, and `accountEnabled` → `active`.
 - Creates missing users in Verify; updates existing users when mapped fields change.
 - If `deactivate_disabled` is true, disabled Azure users are marked inactive in Verify (no hard deletes; deletion is CLI-only and not implemented by default).
+
+## REPL
+- `Synchronize`: Runs the full sync now.
+- `Compare`: Enter a UPN to compare Azure vs Verify and see diffs.
+- `What-if`: Plans the sync and lists would-create and estimated updates.
+
+## Non-interactive commands
+- `whatif`: Outputs a full plan. Use `--format json|csv` and `--output path` to export.
+- `compare <upn>`: Compares a single user. Use `--format json|csv` and `--output path`.
 
 ## Extend
 - Adjust mapping to include phone numbers by toggling `include_mobile_phone` in the sync section.
