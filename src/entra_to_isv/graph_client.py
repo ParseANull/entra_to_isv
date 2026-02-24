@@ -143,6 +143,8 @@ class GraphClient:
 
         We use the Graph shortcut that allows addressing a user by UPN directly
         in the path segment. Handy for compare operations in the REPL.
+        This approach is much faster than calling list_users() when we only need
+        one specific person - no pagination, no extra users, just the one we want.
 
         Args:
             user_principal_name: The Azure AD UPN (usually email-like identifier).
@@ -150,13 +152,22 @@ class GraphClient:
         Returns:
             The user dict if found, otherwise None.
         """
+        # url: str - Initialized with the UPN embedded directly in the path.
+        # Graph accepts UPN as a path segment, which is more efficient than filtering.
         url = f"https://graph.microsoft.com/v1.0/users/{user_principal_name}"
+        # params: Dict - Initialized with the same field selection as list_users()
+        # so callers get the same shape of data regardless of which method they use.
         params = {
             "$select": "id,userPrincipalName,givenName,surname,displayName,mail,mobilePhone,accountEnabled",
         }
+        # resp: httpx.Response - Initialized from GET request for the specific user.
         resp = self._http.get(url, headers=self._headers(), params=params)
         if resp.status_code == 404:
+            # 404 means the user simply doesn't exist in Azure - that's valid, not an error.
+            # We return None so callers can handle "not found" gracefully.
             return None
         if resp.status_code >= 400:
+            # Any other 4xx/5xx is a real problem - raise so callers know something's wrong.
             raise RuntimeError(f"Graph request failed: {resp.status_code} {resp.text}")
+        # Return the parsed user dict, ready for mapping or comparison.
         return resp.json()
